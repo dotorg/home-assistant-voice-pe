@@ -183,6 +183,11 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  # Global variable storing if a VA response was a question. If it is set, we will activate the voice assistant after the response automatically
+  - id: response_was_question
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 switch:
   # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
@@ -1382,6 +1387,13 @@ script:
       # Enable stop wake word
       - lambda: id(stop).enable();
 
+  # Script used to continue the conversation if the TTS response
+  # appears to be a question. 
+  - id: continue_conversation
+    then: 
+      - delay: 100ms
+      - voice_assistant.start:
+
 i2s_audio:
   - id: i2s_output
     # i2s_output data pin is gpio10
@@ -1462,35 +1474,35 @@ media_player:
               duration: 1.0s
     files:
       - id: center_button_press_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_press.flac
+        file: home-assistant-voice-pe/sounds/center_button_press.flac
       - id: center_button_double_press_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_double_press.flac
+        file: home-assistant-voice-pe/sounds/center_button_double_press.flac
       - id: center_button_triple_press_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_triple_press.flac
+        file: home-assistant-voice-pe/sounds/center_button_triple_press.flac
       - id: center_button_long_press_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/center_button_long_press.flac
+        file: home-assistant-voice-pe/sounds/center_button_long_press.flac
       - id: factory_reset_initiated_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_initiated.mp3
+        file: home-assistant-voice-pe/sounds/factory_reset_initiated.mp3
       - id: factory_reset_cancelled_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_cancelled.mp3
+        file: home-assistant-voice-pe/sounds/factory_reset_cancelled.mp3
       - id: factory_reset_confirmed_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/factory_reset_confirmed.mp3
+        file: home-assistant-voice-pe/sounds/factory_reset_confirmed.mp3
       - id: jack_connected_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_connected.flac
+        file: home-assistant-voice-pe/sounds/jack_connected.flac
       - id: jack_disconnected_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_disconnected.flac
+        file: home-assistant-voice-pe/sounds/jack_disconnected.flac
       - id: mute_switch_on_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/mute_switch_on.flac
+        file: home-assistant-voice-pe/sounds/mute_switch_on.flac
       - id: mute_switch_off_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/mute_switch_off.flac
+        file: home-assistant-voice-pe/sounds/mute_switch_off.flac
       - id: timer_finished_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/timer_finished.flac
+        file: home-assistant-voice-pe/sounds/timer_finished.flac
       - id: wake_word_triggered_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
+        file: home-assistant-voice-pe/sounds/glados_what.mp3
       - id: easter_egg_tick_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tick.mp3
+        file: home-assistant-voice-pe/sounds/easter_egg_tick.mp3
       - id: easter_egg_tada_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/easter_egg_tada.mp3
+        file: home-assistant-voice-pe/sounds/easter_egg_tada.mp3
 
 voice_kit:
   i2c_id: internal_i2c
@@ -1614,6 +1626,13 @@ voice_assistant:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - script.execute: control_leds
   on_tts_start:
+    - lambda: |-
+        if (x.find("???") != std::string::npos) {
+          id(response_was_question) = true;
+          ESP_LOGD("va", "The response text was a question.");
+        } else {
+          id(response_was_question) = false;
+        }
     - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
     - script.execute: control_leds
     # Start a script that would potentially enable the stop word if the response is longer than a second
@@ -1644,6 +1663,14 @@ voice_assistant:
     # Reset the voice assistant phase id and reset the LED animations.
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
+    # If the response was a question, wake back up and listen again
+    - if:
+        condition: 
+          lambda: return id(response_was_question) == true;
+        then:
+          - logger.log: "Continuing conversation ... "
+          - lambda: id(response_was_question) = false;
+          - script.execute: continue_conversation
   on_timer_finished:
     - switch.turn_on: timer_ringing
   on_timer_started:
